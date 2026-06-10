@@ -8,16 +8,18 @@ from collections import namedtuple
 from origin_tools.decoder import GramDecoder
 from origin_tools.geometry import cell_length
 
-ADCP_BGRAM_PATH = Path(r"E:\OSCAR\Calibration\echocal_aberdeen_31_10mm_high_susp_friday_morning\echocal_aberdeen_31_10mm_high_susp_friday_morning\A\bgram")
-ECHO_BGRAM_PATH = Path(r"E:\OSCAR\Calibration\echocal_aberdeen_31_10mm_high_susp_friday_morning\echocal_aberdeen_31_10mm_high_susp_friday_morning\B\bgram")
+ADCP_BGRAM_PATH = Path(r"E:\path\to\A\bgram")
+ECHO_BGRAM_PATH = Path(r"E:\path\to\B\bgram")
 
-OUTPUT_ROOT = Path(r"E:\OSCAR\Calibration\echocal_aberdeen_31_10mm_high_susp_friday_morning\echocal_aberdeen_31_10mm_high_susp_friday_morning\output")
+OUTPUT_ROOT = Path(r"E:\path\to\folder\for\output")
 
+# User specified constants 
 ABSORPTION_COEFFICIENT = 0.183
 c = 1500
 
-NOAA_TS_ADCP = -51.30
-NOAA_TS_ECHO = -51.46
+
+NOAA_TS_ADCP = -51.30 # << https://www.fisheries.noaa.gov/data-tools/standard-sphere-target-strength-calculator
+NOAA_TS_ECHO = -51.46 
 
 TEST_NUMBER = 1
 SUSPENSION = 1
@@ -34,9 +36,18 @@ plot_colour_adcp = "lightseagreen"
 plot_colour_echo = "darkorange"
 plot_marker = "o"
 
+
 depths_m = np.linspace(-30, -0.5, 1000)
 
+# Specify expected sphere depths
+# Window(expectedDepth, beamNumber, datetime(yyyy, mm/m, dd/d, hh/h, MM/M, ss/s), datetime(yyyy, mm/m, dd/d, hh/h, MM/M, ss/s)),
 Window = namedtuple("Window", ["depth", "beam_index", "start_time", "end_time"])
+
+# Example:
+schedule = [
+    Window(14.08,4, datetime(2025, 7, 18, 10, 24, 5), datetime(2025, 7, 18, 10, 26, 47)),
+    Window(13.04,4, datetime(2025, 7, 18, 10, 26, 56), datetime(2025, 7, 18, 10, 29, 53)),
+]
 
 CSV_COLS = {
     "test_number": 0,
@@ -52,21 +63,6 @@ CSV_COLS = {
     "noaa_ts": 10,
     "max_recorded_intensity": 11,
 }
-
-schedule = [
-    Window(14.08,4, datetime(2025, 7, 18, 10, 24, 5), datetime(2025, 7, 18, 10, 26, 47)),
-    Window(13.04,4, datetime(2025, 7, 18, 10, 26, 56), datetime(2025, 7, 18, 10, 29, 53)),
-    Window(12.04,4, datetime(2025, 7, 18, 10, 30, 11), datetime(2025, 7, 18, 10, 32, 49)),
-    Window(11.08,4, datetime(2025, 7, 18, 10, 33, 1), datetime(2025, 7, 18, 10, 36, 3)),
-    Window(10.07,4, datetime(2025, 7, 18, 10, 36, 14), datetime(2025, 7, 18, 10, 39, 2)),
-    Window(9.09,4, datetime(2025, 7, 18, 10, 39, 9), datetime(2025, 7, 18, 10, 41, 58)),
-    Window(8.06,4, datetime(2025, 7, 18, 10, 41, 48), datetime(2025, 7, 18, 10, 45, 7)),
-    Window(7.07,4, datetime(2025, 7, 18, 10, 45, 7), datetime(2025, 7, 18, 10, 47, 59)),
-    Window(6.04,4, datetime(2025, 7, 18, 10, 48, 5), datetime(2025, 7, 18, 10, 51, 11)),
-    Window(5.06,4, datetime(2025, 7, 18, 10, 51, 11), datetime(2025, 7, 18, 10, 55, 9)),
-    Window(4.06,4, datetime(2025, 7, 18, 10, 55, 11), datetime(2025, 7, 18, 11, 1, 29))
-
-]
 
 
 def locate_intensity_peak(intensity, range_estimate, cell_size):
