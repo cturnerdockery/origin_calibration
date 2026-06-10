@@ -6,8 +6,10 @@ import csv
 from datetime import datetime, timedelta
 from collections import namedtuple
 
-# Sonardyne in-house processing tools
+# origin_tools is a Sonardyne internal data processing utility library
+# decoder.extract = Extracts specified ADCP properties (such as velocity, intensity, heading, temperature, and pressure) and returns the results as arrays stored in a dictionary or as an ADCPData object.
 from origin_tools.decoder import GramDecoder
+#Determine slant range length (measured along beam) of one bgram bin in metres
 from origin_tools.geometry import cell_length
 
 ADCP_BGRAM_PATH = Path(r"E:\path\to\A\bgram")
