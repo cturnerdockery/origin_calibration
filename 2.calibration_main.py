@@ -6,24 +6,58 @@ import csv
 from datetime import datetime, timedelta
 from collections import namedtuple
 
-# origin_tools is a Sonardyne internal data processing utility library
-# decoder.extract = Extracts specified ADCP properties (such as velocity, intensity, heading, temperature, and pressure) and returns the results as arrays stored in a dictionary or as an ADCPData object.
+# Sonardyne internal data processing utility library
 from origin_tools.decoder import GramDecoder
-#Determine slant range length (measured along beam) of one bgram bin in metres
 from origin_tools.geometry import cell_length
+
+
+"""
+ADCP and Echosounder Calibration Pipeline
+========================================
+
+This script processes calibration sphere data from both ADCP and Echosounder
+(B-gram) datasets and produces calibrated backscatter and unitless intensity results.
+
+It performs the following steps:
+
+1. Loads ADCP and Echosounder B-gram data using GramDecoder.
+2. Applies user-defined calibration windows (time + depth + beam index) from "window_finder".
+3. Extracts intensity profiles for each calibration window.
+4. Detects the calibration sphere peak (with pulse train smoothing for ADCP data).
+5. Writes per-window results to a calibration CSV file.
+6. Generates diagnostic plots for each window.
+7. Performs nonlinear calibration fitting (saturation-aware).
+8. Produces final comparison plots for ADCP vs Echosounder.
+
+Outputs:
+- calibration.csv (per-window metrics)
+- window_###.png (diagnostic intensity profiles)
+- calibration_summary.txt (fit results)
+- calibration_plot.png (final comparison plots)
+
+Workflow:
+1. Set ADCP_BGRAM_PATH and ECHO_BGRAM_PATH
+2. Set user specified constants
+3. Define calibration windows in `schedule`
+4. Run script (main())
+5. Inspect plots and CSV output
+6. Use results for further calibration analysis
+    The calibration factor produced in calibration_summary.txt can be applied to the data using TS_calibration and Sv_calbration scripts
+
+Notes:
+- Times are shifted by +1 hour (BST adjustment)
+"""
 
 ADCP_BGRAM_PATH = Path(r"E:\path\to\A\bgram")
 ECHO_BGRAM_PATH = Path(r"E:\path\to\B\bgram")
-
 OUTPUT_ROOT = Path(r"E:\path\to\folder\for\output")
 
-# User specified constants 
+# User specified constants
 ABSORPTION_COEFFICIENT = 0.183
 c = 1500
 
-
 NOAA_TS_ADCP = -51.30 # << https://www.fisheries.noaa.gov/data-tools/standard-sphere-target-strength-calculator
-NOAA_TS_ECHO = -51.46 
+NOAA_TS_ECHO = -51.46
 
 TEST_NUMBER = 1
 SUSPENSION = 1
@@ -40,12 +74,14 @@ plot_colour_adcp = "lightseagreen"
 plot_colour_echo = "darkorange"
 plot_marker = "o"
 
-
 depths_m = np.linspace(-30, -0.5, 1000)
 
+
 # Specify expected sphere depths
+
 # Window(expectedDepth, beamNumber, datetime(yyyy, mm/m, dd/d, hh/h, MM/M, ss/s), datetime(yyyy, mm/m, dd/d, hh/h, MM/M, ss/s)),
 Window = namedtuple("Window", ["depth", "beam_index", "start_time", "end_time"])
+
 
 # Example:
 schedule = [
@@ -70,6 +106,36 @@ CSV_COLS = {
 
 
 def locate_intensity_peak(intensity, range_estimate, cell_size):
+    """
+       Locate the peak backscatter intensity an expected range window.
+
+       This function finds the maximum intensity value in a vertical profile
+       (range-backscatter), restricted to a small search window
+       around the expected target range.
+
+       The method:
+       1. Collapses the intensity array to a single profile using max over pings.
+       2. Restricts search to ±0.25 m around the expected range.
+       3. Identifies the index of the maximum value within this window.
+       4. Returns the corresponding depth and intensity value.
+
+       Parameters
+       ----------
+       intensity : np.ndarray
+       range_estimate : float
+           Expected target depth (m) used as the center of the search window.
+       cell_size : float
+           Vertical resolution per cell (m).
+
+       Returns
+       -------
+       peak_depth : float
+           Depth (m) of the detected intensity maximum.
+       peak_intensity : float
+           Intensity value at the detected peak.
+       max_profile : np.ndarray
+           Maximum intensity profile collapsed over pings/beams.
+       """
     max_profile = np.max(intensity, axis=0)
 
     start = max(0, int((range_estimate - 0.25) / cell_size))
@@ -82,6 +148,41 @@ def locate_intensity_peak(intensity, range_estimate, cell_size):
 
 
 def locate_intensity_peak_moving_avg(intensity, range_estimate, cell_size, pulse_length_m):
+    """
+       Locate the peak backscatter intensity using a moving-average smoothed profile.
+
+        This function finds the maximum intensity value in a vertical profile
+       (range-backscatter), restricted to a small search window around the expected target range.
+       The ADCP pings produce a pulse train, To obtain an accurate representation of the sphere,
+       the maximum intensity is averaged over a depth window equal to the pulse train length.
+
+       Method:
+       1. Collapse intensity data into a single range profile using a max over pings.
+       2. Apply a moving-average filter with window size proportional to pulse train length.
+       3. Search for the maximum value within a ±0.5 m window around the expected range.
+       4. Return the detected peak position and associated intensity values.
+
+       Parameters
+       ----------
+       intensity : np.ndarray
+       range_estimate : float
+           Expected target depth (m), used to center the search window.
+       cell_size : float
+           Vertical resolution per range cell (m).
+       pulse_length_m : float
+           Acoustic pulse length expressed in meters; used to define smoothing window.
+
+       Returns
+       -------
+       peak_depth : float or None
+           Depth (m) of detected intensity maximum. Returns None if no valid window.
+       peak_intensity : float or None
+           Smoothed intensity value at peak location.
+       max_profile : np.ndarray
+           Raw maximum intensity profile (collapsed over pings/beams).
+       smooth : np.ndarray
+           Smoothed intensity profile used for peak detection.
+       """
     max_profile = np.max(intensity, axis=0)
 
     window_cells = max(3, int(pulse_length_m / cell_size))
@@ -100,6 +201,11 @@ def locate_intensity_peak_moving_avg(intensity, range_estimate, cell_size, pulse
 
 
 def append_csv(path, rows):
+    """
+        Append calibration rows to a CSV file.
+
+        Creates the folder if needed and writes the header.
+        """
     path.parent.mkdir(parents=True, exist_ok=True)
     write_header = not path.exists()
 
@@ -111,6 +217,25 @@ def append_csv(path, rows):
 
 
 def compute_global_max_intensity(decoder, windows, is_adcp):
+    """
+       Compute global maximum intensity across calibration windows.
+
+       Method:
+           1. Loop through each calibration window.
+           2. Extract intensity data for the window time range.
+           3. Compute maximum intensity per window.
+           4. Return the highest value across all windows.
+
+       Parameters
+       ----------
+       windows : list[Window]
+           Calibration windows
+
+       Returns
+       -------
+       float
+           Global maximum intensity across all windows.
+       """
     max_val = -np.inf
 
     for w in windows:
@@ -133,6 +258,35 @@ def compute_global_max_intensity(decoder, windows, is_adcp):
 
 
 def process_unit(name, decoder, windows, output_folder, is_adcp=False, global_max=None):
+    """
+       Process calibration windows and generate intensity profiles and CSV output.
+
+       Method:
+           1. Loop through calibration windows.
+           2. Extract intensity data for each time range.
+           3. Locate sphere peak (smoothed for ADCP, max for ECHO).
+           4. Store results in a structured CSV row.
+           5. Generate and save per-window intensity plots.
+
+       Parameters
+       ----------
+       name : str
+           Name of the dataset (used for plot titles and data identification).
+       decoder : GramDecoder
+           B-gram decoder used to extract intensity data.
+       windows : list[Window]
+           Calibration windows defining time, depth, and beam index.
+       output_folder : pathlib.Path
+           Directory where plots and CSV output will be saved.
+       is_adcp : bool, optional
+           If True, applies ADCP-specific processing (default False).
+       global_max : float or None
+           Global maximum intensity used for max saturation intensity.
+
+       Returns
+       -------
+       None
+       """
     rows = []
 
     for i, w in enumerate(windows):
@@ -199,6 +353,11 @@ PLOT_DATA = []
 
 
 def load_csv(filename):
+    """
+    Load calibration CSV file into a NumPy array.
+
+    Returns a 2D array even when the file contains a single row.
+    """
     data = np.genfromtxt(filename,
                          delimiter=",",
                          skip_header=1)
@@ -206,7 +365,32 @@ def load_csv(filename):
     return data.reshape(1, -1) if data.ndim == 1 else data
 
 
-def unitless_calibration(intensity, depth, absorb, noaa_ts, gain):
+def unitless_calibration_factor(intensity, depth, absorb, noaa_ts, gain):
+    """
+      Compute unitless backscatter calibration factor.
+
+      Method:
+          Applies calibration corrections to convert raw intensity
+          into The calibration factor.
+
+      Parameters
+      ----------
+      intensity : float or np.ndarray
+          Measured backscatter intensity.
+      depth : float or np.ndarray
+          Target depth (m).
+      absorb : float
+         Absorption coefficient. (currently hard coded for user configuration)
+      noaa_ts : float
+          NOAA theoretical target strength (dB).(currently hard coded for user configuration)
+      gain : float
+          Instrument gain (dB).
+
+      Returns
+      -------
+      float or np.ndarray
+          Unitless calibration factor.
+      """
     return (
             20 * np.log10(intensity)
             + 40 * np.log10(np.abs(depth))
@@ -217,9 +401,36 @@ def unitless_calibration(intensity, depth, absorb, noaa_ts, gain):
 
 
 def saturated_curve(depth_array, true_unitless, absorb, noaa_ts, gain, sat_intensity):
+    """
+       Apply saturation value to unitless calibration curve.
+
+       Method:
+           Computes the calibration curve using the max intensity recorded,
+           plotting the calibration factor, as it would be at saturation.
+
+       Parameters
+       ----------
+       depth_array : np.ndarray
+           Array of depths (m) over which the curve is evaluated. (can be changed for deeper calibrations)
+       true_unitless : float or np.ndarray
+           Fitted unitless calibration value.
+      absorb : float
+         Absorption coefficient. (currently hard coded for user configuration)
+      noaa_ts : float
+          NOAA theoretical target strength (dB).(currently hard coded for user configuration)
+      gain : float
+          Instrument gain (dB).
+       sat_intensity : float
+           Max intensity recorded, value at saturation.
+
+       Returns
+       -------
+       np.ndarray
+           Saturated value calibration curve.
+       """
     return np.minimum(
         true_unitless,
-        unitless_calibration(sat_intensity,
+        unitless_calibration_factor(sat_intensity,
                              depth_array,
                              absorb,
                              noaa_ts,
@@ -228,6 +439,38 @@ def saturated_curve(depth_array, true_unitless, absorb, noaa_ts, gain, sat_inten
 
 
 def calibrate_sphere_unitless(depth, intensity, absorb, noaa_ts, gain, sat_intensity):
+    """
+      Fit unitless calibration factor for the recorded sphere intensity
+      against the saturated model.
+
+      Method:
+          Converts raw intensity into unitless calibration factors.
+          Defines a saturation model of expected factor at saturation.
+          Fit model to observed data using non-linear least squares.
+          Return best-fit calibration factor and uncertainty.
+
+      Parameters
+      ----------
+      depth : np.ndarray
+          Depth values (m) of sphere.
+      intensity : np.ndarray
+          Measured backscatter sphere intensity.
+      absorb : float
+         Absorption coefficient. (currently hard coded for user configuration)
+      noaa_ts : float
+          NOAA theoretical target strength (dB).(currently hard coded for user configuration)
+      gain : float
+          Instrument gain (dB).
+       sat_intensity : float
+           Max intensity recorded, value at saturation.
+
+      Returns
+      -------
+      fitted_value : float
+          Best-fit unitless calibration factor.
+      fitted_std : float
+          Standard deviation (1σ) from covariance matrix.
+      """
     def cutoff(depth, true_unitless):
         return saturated_curve(depth,
                                true_unitless,
@@ -236,19 +479,30 @@ def calibrate_sphere_unitless(depth, intensity, absorb, noaa_ts, gain, sat_inten
                                gain,
                                sat_intensity)
 
-    unitless_points = unitless_calibration(intensity, depth, absorb, noaa_ts, gain)
+    unitless_points = unitless_calibration_factor(intensity, depth, absorb, noaa_ts, gain)
 
     popt, pcov = curve_fit(cutoff, depth, unitless_points)
 
     return popt[0], np.sqrt(pcov[0, 0])
 
 
-def process_calibration_file(
-        csv_file,
-        label,
-        colour,
-        marker="o",
-):
+def process_calibration_file(csv_file,label,colour,marker="o"):
+    """
+       Process calibration CSV and store results for plotting and summary output.
+
+       Method:
+           1. Load calibration CSV file.
+           2. Extract intensity, depth, and instrument metadata.
+           3. Compute unitless calibration values.
+           4. Fit saturation calibration model.
+           5. Compute residuals and summary statistics.
+           6. Save summary text file.
+           7. Store results for final plotting stage.
+
+       Returns
+       -------
+       None
+       """
     data = load_csv(csv_file)
 
     csv_path = Path(csv_file)
@@ -261,7 +515,7 @@ def process_calibration_file(
     noaa_ts = data[0, CSV_COLS["noaa_ts"]]
     sat_intensity = (data[0, CSV_COLS["max_recorded_intensity"]])
 
-    unitless = unitless_calibration(
+    unitless = unitless_calibration_factor(
         intensity,
         depth,
         ABSORPTION_COEFFICIENT,
@@ -287,7 +541,7 @@ def process_calibration_file(
         sat_intensity,
     )
 
-    saturation_curve_only = unitless_calibration(
+    saturation_curve_only = unitless_calibration_factor(
         sat_intensity,
         depths_m,
         ABSORPTION_COEFFICIENT,
@@ -297,7 +551,7 @@ def process_calibration_file(
 
     residuals = (
             unitless
-            - unitless_calibration(
+            - unitless_calibration_factor(
         sat_intensity,
         depth,
         ABSORPTION_COEFFICIENT,
@@ -344,6 +598,20 @@ def process_calibration_file(
 
 
 def plot_all_gains_with_coloured_deviation_fixed(out_dir, k_sigma=2):
+    """
+       Plot calibration results and residual deviations across datasets.
+
+       Method:
+           1. Plot unitless calibration curves for all datasets.
+           2. Overlay measured calibration points and fitted models.
+           3. Compute residuals from saturation model.
+           4. Highlight deviations beyond ksigma threshold.
+           5. Save combined comparison figure to output folder.
+
+       Returns
+       -------
+       None
+       """
     fig, (ax1, ax2) = plt.subplots(
         1,
         2,
@@ -446,6 +714,19 @@ def plot_all_gains_with_coloured_deviation_fixed(out_dir, k_sigma=2):
 
 
 def run_pipeline(name, bgram_path, label, colour, is_adcp):
+    """
+       Execute full calibration pipeline for a single instrument.
+
+       Method:
+           1. Initialise output directory and decoder.
+           2. Compute global intensity maximum across windows.
+           3. Process calibration windows and generate CSV output.
+           4. Fit calibration model and generate summary plots.
+
+       Returns
+       -------
+       None
+       """
     global PLOT_DATA
     PLOT_DATA = []
 
