@@ -16,8 +16,8 @@ from Tools.decoder import GramDecoder
  Calibration Window Finder
 ================================
 
-Orignal Author: TAFC
-Adpated by: CTD 
+Orignal Author: Anon
+Adpated by: Anon 
 
 1. Loads B-gram data using GramDecoder.
 2. Displays a full-record echogram for quick inspection.
@@ -40,7 +40,7 @@ Steps:
 ### User configurations
 
 # Path containing either ADCP or Echo bgrams from a calibration run
-folder_path = r"E:\Indigo\Calibration\Deplopyments\echocal_indigo_34_10mm_high_susp_tuesday_afternoon\echocal_indigo_34_10mm_high_susp_tuesday_afternoon\B\bgram"
+folder_path = r"path\to\bgram"
 
 
 #Set MODE
