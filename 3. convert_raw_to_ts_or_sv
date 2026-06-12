@@ -310,4 +310,4 @@ plot_bgram(
     gd.first_ping,
     metric=METHOD,
     ping_type=PING_TYPE,
-    c=SPEED_OF_SOUND)
+    c=SPEE
