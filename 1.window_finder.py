@@ -17,7 +17,7 @@ from Tools.decoder import GramDecoder
 ================================
 
 Orignal Author: Thomas Comerford
-Adpated by: Chloe TUrner-Dockery 
+Adpated by: Chloe Turner-Dockery 
 
 1. Loads B-gram data using GramDecoder.
 2. Displays a full-record echogram for quick inspection.
