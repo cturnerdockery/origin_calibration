@@ -16,8 +16,8 @@ from Tools.decoder import GramDecoder
  Calibration Window Finder
 ================================
 
-Orignal Author: Anon
-Adpated by: Anon 
+Orignal Author: Thomas Comerford
+Adpated by: Chloe TUrner-Dockery 
 
 1. Loads B-gram data using GramDecoder.
 2. Displays a full-record echogram for quick inspection.
